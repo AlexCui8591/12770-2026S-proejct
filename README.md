@@ -6,7 +6,7 @@
 
 **Authors:** Zhengjie Cui, Zihao Hu, Junchi Fan, Bo Zhang
 
-**Project Blog:** [https://boz322.github.io/12770-Project/](https://boz322.github.io/12770-Project/)
+**Project Blog:** https://github.com/AlexCui8591/12770-2026S-proejct/
 
 ---
 
