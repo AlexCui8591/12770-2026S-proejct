@@ -1,192 +1,240 @@
-# Home Temperature Control Agent
+# LLM-in-the-Loop Adaptive HVAC Control
 
-一个面向 Home Assistant 的智能温控系统，通过自然语言指令驱动 PID 控制器自动调节空调/暖气。
+> Bridging Natural Language Understanding and Closed-Loop PID Control via Agent-Based Architecture
+
+**CMU 12-770 Course Project | Spring 2026**
+
+**Authors:** Zhengjie Cui, Zihao Hu, Junchi Fan, Bo Zhang
+
+**Project Blog:** [https://boz322.github.io/12770-Project/](https://boz322.github.io/12770-Project/)
 
 ---
 
 ## Overview
 
-```text
-用户自然语言
-    ↓
-Agent（自然语言理解 + Tool Use）
-    ├── get_weather()        → 室外天气
-    ├── get_user_habits()    → 用户偏好
-    ├── get_room_status()    → 房间传感器
-    ├── get_energy_price()   → 峰谷电价
-    ├── get_schedule()       → 用户日程
-    └── get_solar_radiation() → 本地太阳辐射
-    ↓
-结构化目标配置（JSON）
-    ↓
-PID Controller（闭环自动控制）
-    ↓
-Home Assistant API
-    ↓
-空调 / 暖气 / 风扇
-    ↓
-温度传感器反馈
-    ↺
+Traditional smart thermostats require manual configuration of temperatures, schedules, and operating modes—failing to account for dynamic factors such as real-time weather, electricity tariffs, and personal daily routines. This project develops a **Natural-Language-Driven Intelligent HVAC Control Agent** that accepts plain-English comfort directives (e.g., *"Make the bedroom cooler, but keep electricity costs low"*) and translates them into adaptive control actions for downstream PID controllers.
+
+The core innovation is the **PID-as-Tool** paradigm: rather than generating a one-shot setpoint, the LLM agent treats the PID controller as a bidirectional callable tool—reading telemetry and writing parameter updates at runtime—transforming the agent from a translator into an online closed-loop supervisor.
+
+## Architecture
+
+The system is organized into four layers:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Layer 1: User Input Layer                      │
+│  Natural-language thermal comfort directives    │
+└──────────────────────┬──────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────┐
+│  Layer 2: Semantic Decision Layer (LLM Agent)   │
+│  Qwen2.5-7B via Ollama                          │
+│  • Intent parsing → structured schema           │
+│  • Tool invocation (7 tools)                    │
+│  • Supervisory reasoning (every 5 min)          │
+│  • Dual-strategy inference (tool-call + fallback│
+└──────────────────────┬──────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────┐
+│  Layer 3: Adaptive Control Layer                │
+│  • Self-adaptive PID (Kp, Ki, Kd online tuning) │
+│  • Cost function: J = ω_comfort·∫e²dt           │
+│    + ω_energy·∫P dt + ω_response·∫(du/dt)²dt   │
+│  • Nelder-Mead / Bayesian Optimization          │
+└──────────────────────┬──────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────┐
+│  Layer 4: Data Support Layer                    │
+│  SQLite database with 7 tool interfaces:        │
+│  weather, tariff, schedule, room state,          │
+│  user habits, solar irradiance, PID telemetry   │
+└─────────────────────────────────────────────────┘
 ```
 
-| 层级 | 职责 |
-|------|------|
-| **Agent** | 解析用户自然语言，通过 tool use 获取天气/电价/习惯等外部信息，输出结构化控制配置 JSON |
-| **PID Controller** | 读取目标温度与当前温度，计算控制量，映射为 HA 动作 |
-| **Home Assistant** | 提供设备状态，执行 climate 服务调用 |
+## Repository Structure
 
----
+```
+12770-Project/
+├── pyproject.toml            # Project metadata and dependencies (uv)
+├── README.md
+├── docs/                     # GitHub Pages blog / journal
+│   └── index.md
+├── agent/                    # LLM agent core
+│   ├── agent.py              # Main agent loop
+│   ├── tools.py              # Tool definitions (7 tools)
+│   ├── schema.py             # Output schema validation
+│   └── dual_strategy.py      # Tool-call + prompt-injection fallback
+├── controller/               # PID control layer
+│   ├── pid.py                # Baseline fixed-parameter PID
+│   ├── adaptive_pid.py       # Self-adaptive PID with cost function
+│   ├── optimizer.py          # Nelder-Mead / BO gain search
+│   ├── mapper.py             # Home Assistant action mapping
+│   └── safety.py             # Safety constraints enforcement
+├── data/                     # Data support layer
+│   ├── database.py           # SQLite interface
+│   ├── weather.py            # Outdoor weather query
+│   ├── tariff.py             # Electricity tariff lookup
+│   ├── schedule.py           # User schedule query
+│   ├── solar.py              # Solar irradiance forecast
+│   └── telemetry.py          # PID telemetry tool
+├── simulation/               # Simulation environment
+│   ├── thermal_model.py      # Single-zone thermal dynamics
+│   ├── scenarios.py          # S1–S6 scenario definitions
+│   └── runner.py             # Experiment runner
+├── experiments/              # Experiment configs and results
+│   ├── configs/              # YAML configs for C0–C3 conditions
+│   └── results/              # Raw logs and analysis outputs
+└── tests/                    # Unit and integration tests
+    ├── test_agent.py
+    ├── test_pid.py
+    └── test_thermal_model.py
+```
 
-## Quick Start
+## Environment Setup
 
-**前置条件**
+### Prerequisites
 
-- Python 3.10+
-- 运行中的 Home Assistant 实例（本地或远程）
-- HA 长期访问令牌（Settings → Profile → Long-Lived Access Tokens）
+- **Python 3.11+**
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager
+- **[Ollama](https://ollama.com/)** — local LLM inference runtime
 
-**安装**
+### 1. Clone the repository
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/Boz322/12770-Project.git
+cd 12770-Project
 ```
 
-**最小运行示例**
+### 2. Initialize the project with uv
+
+The project uses `uv` for dependency management. If you don't have `uv` installed:
 
 ```bash
-python main.py \
-  --command "卧室凉一点" \
-  --room bedroom \
-  --ha-url http://homeassistant.local:8123 \
-  --ha-token YOUR_TOKEN
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
----
+Then initialize and sync:
 
-## Project Structure
+```bash
+# Initialize (if pyproject.toml doesn't exist yet)
+uv init
 
-```text
-project/
-├── README.md                  # 本文件
-├── 需求.md                    # 原始需求文档（中文）
-├── docs/
-│   ├── agent.md               # Agent 输入/输出规范、System Prompt
-│   ├── controller.md          # PID 公式、控制输出映射、安全模块
-│   ├── ha_integration.md      # Home Assistant 集成与 API 参考
-│   └── config_reference.md   # 配置文件字段完整说明
-├── agent/
-│   ├── prompt.txt             # Agent System Prompt
-│   ├── parser.py              # 自然语言解析，调用 LLM，返回 JSON
-│   ├── schema.py              # Agent 输入/输出 schema 定义与校验
-│   └── tools.py               # Tool Use 实现（天气、电价、用户习惯等）
-├── controller/
-│   ├── pid.py                 # PID 算法实现
-│   ├── mapper.py              # 控制量 u → HA 动作映射
-│   └── safety.py             # 温度限幅、防短循环、窗户联锁
-├── ha/
-│   ├── client.py              # HA REST API 客户端（含冷却限速）
-│   └── services.py            # climate 服务封装
-├── config/
-│   ├── rooms.yaml             # 房间与 entity_id 映射
-│   ├── limits.yaml            # 安全温度范围、冷却时间等
-│   └── pid.yaml               # Kp / Ki / Kd / deadband / dt
-└── logs/                      # 运行日志（第四阶段启用）
+# Install all dependencies
+uv sync
 ```
 
----
+### 3. Configure `pyproject.toml`
 
-## How It Works
+The `pyproject.toml` should contain:
 
-完整数据流（以卧室示例为例）：
+```toml
+[project]
+name = "llm-hvac-control"
+version = "0.1.0"
+description = "LLM-in-the-Loop Adaptive HVAC Control System"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Zhengjie Cui" },
+    { name = "Zihao Hu" },
+    { name = "Junchi Fan" },
+    { name = "Bo Zhang" },
+]
 
-**1. 用户输入**
+dependencies = [
+    "ollama>=0.4.0",
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "pandas>=2.2.0",
+    "matplotlib>=3.8.0",
+    "pyyaml>=6.0",
+    "requests>=2.31.0",
+]
 
-```text
-"今晚卧室凉一点，但不要太费电"
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 ```
 
-**2. Agent 调用 Tools 获取外部信息**
+### 4. Install and pull the LLM model
 
-```text
-get_weather("Pittsburgh")       → {"outdoor_temp": 5.2, "humidity": 72, ...}
-get_user_habits("user1", "night") → {"preferred_sleep_temp": 23.0, ...}
-get_energy_price("2026-03-29T22:30:00") → {"tier": "peak", ...}
-get_solar_radiation("2026-03-29T14:00:00") → {"ghi": 512.3, "dni": 621.8, "dhi": 118.4, "source": "Open-Meteo Forecast API", ...}
+```bash
+# Install Ollama (see https://ollama.com/download)
+# Then pull the Qwen2.5-7B model:
+ollama pull qwen2.5:7b
 ```
 
-**3. Agent 综合推理，输出结构化配置**
+### 5. Verify installation
 
-```json
-{
-  "room": "bedroom",
-  "target_temperature": 24.0,
-  "hvac_mode": "cool",
-  "preset_mode": "eco",
-  "fan_mode": "low",
-  "deadband": 0.5,
-  "valid_until": null,
-  "reason": "室外 5°C 散热快无需过度制冷；用户睡眠偏好 23°C；峰时电价优先节能，取 24°C 平衡舒适与省电"
-}
+```bash
+# Activate the virtual environment
+source .venv/bin/activate   # Linux/macOS
+# or: .venv\Scripts\activate  # Windows
+
+# Run tests
+uv run pytest
+
+# Verify Ollama is running
+ollama list
 ```
 
-**4. PID 控制器计算**
+## Usage
 
-```text
-current_temperature = 27.2
-target_temperature  = 24.0
-error               = -3.2  →  触发强制制冷区间
+### Run the agent with a natural-language command
+
+```bash
+uv run python -m agent.agent --query "Make the bedroom cooler, but keep electricity costs low"
 ```
 
-**5. Home Assistant 执行**
+### Run a simulation scenario
 
-```text
-climate.set_hvac_mode(cool)
-climate.set_temperature(24)
-climate.set_fan_mode(low)
+```bash
+# Run scenario S1 (steady-state tracking) with condition C0 (fixed PID baseline)
+uv run python -m simulation.runner --scenario S1 --condition C0
+
+# Run all scenarios with all conditions (full experiment)
+uv run python -m simulation.runner --all --runs 5
 ```
 
-**6. 传感器反馈，PID 持续闭环调节**
+### Run ablation studies
 
----
+```bash
+uv run python -m simulation.runner --ablation A1  # Cost-function ablation
+uv run python -m simulation.runner --ablation A2  # Supervision frequency
+uv run python -m simulation.runner --ablation A3  # Proactive vs. reactive
+```
 
-## Configuration
+## Experimental Design
 
-| 文件 | 作用 |
-|------|------|
-| `config/rooms.yaml` | 定义房间名称与 HA entity_id 的映射 |
-| `config/limits.yaml` | 安全温度上下限、API 冷却时间、防短循环时间 |
-| `config/pid.yaml` | PID 参数（Kp / Ki / Kd）、deadband、控制周期 dt |
+| Condition | Description | PID Params | LLM Role |
+|-----------|-------------|------------|----------|
+| C0 | Fixed PID Baseline | Static (manual) | None |
+| C1 | LLM Setpoint-Only | Static | One-shot setpoint |
+| C2 | LLM-in-the-Loop (Reactive) | LLM-supervised | Online supervisor |
+| C3 | LLM-in-the-Loop (Proactive) | LLM-supervised | Proactive + reactive |
 
-详细字段说明见 [docs/config_reference.md](docs/config_reference.md)。
+Six test scenarios (S1–S6) covering steady-state tracking, weather disturbance, cost optimization, occupancy adaptation, multi-disturbance stress, and LLM failure resilience. Each (condition, scenario) pair is run 5 times with different random seeds.
 
----
+See the [project report](docs/) for full experimental design details.
 
-## Development Phases
+## License
 
-| 阶段 | 功能 | 关键交付物 |
-|------|------|-----------|
-| **第一阶段** | 单房间、仅目标温度、基础 PID | `parser.py` + `pid.py` + `set_temperature` |
-| **第二阶段** | 加入 `preset_mode` / `fan_mode` / `deadband` | `mapper.py` + `schema.py` 完善 |
-| **第三阶段** | 上下文感知（占用状态、窗户、时间段） | `safety.py` + 上下文字段扩展 |
-| **第四阶段** | 日志与评估 | `logs/` 完整记录链路 |
+MIT
 
----
+## Acknowledgments
 
-## Safety Constraints
-
-1. 目标温度必须在 `[20, 28]°C` 范围内
-2. Agent 禁止直接输出 PID 参数（Kp / Ki / Kd）
-3. 支持手动接管开关，优先级高于自动控制
-4. 窗户打开时暂停自动制冷
-5. 防止频繁启停（最小开/关间隔）
-6. HA API 调用设有冷却时间，避免频繁请求
-7. 所有控制行为记录日志，便于审计
-
----
-
-## Further Reading
-
-- [docs/agent.md](docs/agent.md) — Agent 输入/输出规范、System Prompt、解析规则
-- [docs/controller.md](docs/controller.md) — PID 公式、控制输出映射、安全模块
-- [docs/ha_integration.md](docs/ha_integration.md) — HA 集成、API 调用示例
-- [docs/config_reference.md](docs/config_reference.md) — 配置文件完整字段参考
+CMU 12-770: Control Systems for Intelligent Buildings, Spring 2026.
