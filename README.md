@@ -237,4 +237,4 @@ MIT
 
 ## Acknowledgments
 
-CMU 12-770: Control Systems for Intelligent Buildings, Spring 2026.
+CMU 12-770 Spring 2026.
